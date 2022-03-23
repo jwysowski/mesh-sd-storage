@@ -1,0 +1,8 @@
+Debug
+mesh_sd_storage_test Debug.launch
+mesh_sd_storage Debug.launch
+STM32F303K8TX_FLASH.ld
+.cproject
+.mxproject
+.project
+.settings
