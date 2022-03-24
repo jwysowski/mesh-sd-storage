@@ -44,6 +44,7 @@
 #define LOG_SIZE			40
 #define TIMESTAMP_SIZE		13
 #define CONVERSION_SIZE		3
+#define EXTENSION_SIZE		4
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -72,6 +73,7 @@ struct date_time {
 
 struct log {
 	char msg[LOG_SIZE];
+	uint8_t log_length;
 	uint8_t file_name_length;
 	struct date_time timestamp;
 };
@@ -125,9 +127,9 @@ void MX_FREERTOS_Init(void) {
 	/* definition and creation of defaultTask */
 
 	/* USER CODE BEGIN RTOS_THREADS */
-	BaseType_t x = xTaskCreate(read_rtc, "read_rtc", 150, NULL, 2, NULL);
-	x = xTaskCreate(build_log, "build_log", 150, NULL, 3, NULL);
-	x = xTaskCreate(write_sd, "write_sd", 310, NULL, 4, NULL);
+	xTaskCreate(read_rtc, "read_rtc", 150, NULL, 2, NULL);
+	xTaskCreate(build_log, "build_log", 150, NULL, 3, NULL);
+	xTaskCreate(write_sd, "write_sd", 310, NULL, 4, NULL);
 	/* USER CODE END RTOS_THREADS */
 }
 
@@ -141,6 +143,8 @@ void read_rtc() {
 			continue;
 
 		memcpy(receive, uart_buffer, MESSAGE_SIZE);
+		memset(uart_buffer, 0, MESSAGE_SIZE);
+
 		get_time(&t);
 		xQueueSendToBack(timestamps, (void *)&t, (TickType_t )5);
 
@@ -158,20 +162,20 @@ void build_log() {
 		char conversion[CONVERSION_SIZE] = { 0 };
 
 		mesh_log.msg[0] = '\0';
-		sprintf(conversion, "%d", t.date.Date);
+		sprintf(conversion, "%02d", t.date.Date);
 		strcat(mesh_log.msg, conversion);
-		sprintf(conversion, "%d", t.date.Month);
+		sprintf(conversion, "%02d", t.date.Month);
 		strcat(mesh_log.msg, conversion);
-		sprintf(conversion, "%d", t.date.Year);
+		sprintf(conversion, "%2d", t.date.Year);
 		strcat(mesh_log.msg, conversion);
 
 		mesh_log.file_name_length = strlen(mesh_log.msg);
 
-		sprintf(conversion, "%d", t.time.Hours);
+		sprintf(conversion, "%02d", t.time.Hours);
 		strcat(mesh_log.msg, conversion);
-		sprintf(conversion, "%d", t.time.Minutes);
+		sprintf(conversion, "%02d", t.time.Minutes);
 		strcat(mesh_log.msg, conversion);
-		sprintf(conversion, "%d", t.time.Seconds);
+		sprintf(conversion, "%02d", t.time.Seconds);
 		strcat(mesh_log.msg, conversion);
 
 		uint8_t timestamp_length = strlen(mesh_log.msg);
@@ -179,20 +183,21 @@ void build_log() {
 		for (int i = 0; i < MESSAGE_SIZE; i++)
 			mesh_log.msg[timestamp_length + 1 + i] = uart_buffer[i];
 
-		mesh_log.msg[timestamp_length + 1 + MESSAGE_SIZE] = '\0';
+		mesh_log.log_length = timestamp_length + 1 + MESSAGE_SIZE;
 
 		xQueueSendToBack(logs, (void *)&mesh_log, (TickType_t )5);
 	}
 }
-
+/*
+*	extern uint8_t retUSER	->	Return value for USER
+*	extern char USERPath[4]	->	USER logical drive path
+*	extern FATFS USERFatFS	->	File system object for USER logical drive
+*	extern FIL USERFile		->	File object for USER
+*/
 void write_sd() {
 	struct log mesh_log;
-
-//	extern uint8_t retUSER; /* Return value for USER */
-//	extern char USERPath[4]; /* USER logical drive path */
-//	extern FATFS USERFatFS; /* File system object for USER logical drive */
-//	extern FIL USERFile; /* File object for USER */
 	UINT bw = 0;
+	const char *txt_ext = ".txt";
 	HAL_UART_Receive_IT(&huart1, uart_buffer, MESSAGE_SIZE);
 	for (;;) {
 		if (xQueueReceive(logs, (void *)&mesh_log,
@@ -200,12 +205,13 @@ void write_sd() {
 			continue;
 
 		char *file_name = pvPortMalloc(
-				(mesh_log.file_name_length + 1) * sizeof(char));
+				(mesh_log.file_name_length + 1 + EXTENSION_SIZE) * sizeof(char));
 
 		for (int i = 0; i < mesh_log.file_name_length + 1; i++)
 			file_name[i] = mesh_log.msg[i];
 
 		file_name[mesh_log.file_name_length] = '\0';
+		strcat(file_name, txt_ext);
 
 		retUSER = f_mount(&USERFatFS, "/", 1);
 		if (retUSER != FR_OK)
@@ -213,7 +219,7 @@ void write_sd() {
 
 		retUSER = f_open(&USERFile, file_name, FA_OPEN_ALWAYS | FA_READ | FA_WRITE);
 		retUSER = f_lseek(&USERFile, f_size(&USERFile));
-		retUSER = f_write(&USERFile, (void *)mesh_log.msg, LOG_SIZE, &bw);
+		retUSER = f_write(&USERFile, (void *)mesh_log.msg, mesh_log.log_length, &bw);
 		retUSER = f_close(&USERFile);
 		retUSER = f_mount(0, "/", 1);
 
@@ -226,4 +232,3 @@ void get_time(struct date_time *t) {
 	HAL_RTC_GetDate(&hrtc, &t->date, RTC_FORMAT_BIN);
 }
 /* USER CODE END Application */
-

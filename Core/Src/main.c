@@ -36,7 +36,16 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define INIT_RTC	1
+#define INIT_RTC			1
+#define HOURS				0x22
+#define MINUTES				0x20
+#define SECONDS				0x00
+#define DAY_LIGHT_SAVING	RTC_DAYLIGHTSAVING_NONE
+#define STORE_OPERATION		RTC_STOREOPERATION_RESET
+#define WEEK_DAY			RTC_WEEKDAY_THURSDAY
+#define	MONTH				RTC_MONTH_MARCH
+#define DATE				0x24
+#define YEAR				0x22
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -162,18 +171,19 @@ void SystemClock_Config(void) {
 void init_rtc() {
 	RTC_TimeTypeDef time;
 	RTC_DateTypeDef date;
-	time.Hours = 0x23; // set hours
-	time.Minutes = 0x45; // set minutes
-	time.Seconds = 0x00; // set seconds
-	time.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
-	time.StoreOperation = RTC_STOREOPERATION_RESET;
+
+	time.Hours = HOURS;
+	time.Minutes = MINUTES;
+	time.Seconds = SECONDS;
+	time.DayLightSaving = DAY_LIGHT_SAVING;
+	time.StoreOperation = STORE_OPERATION;
 	if (HAL_RTC_SetTime(&hrtc, &time, RTC_FORMAT_BCD) != HAL_OK)
 		Error_Handler();
 
-	date.WeekDay = RTC_WEEKDAY_SATURDAY;
-	date.Month = RTC_MONTH_MARCH;
-	date.Date = 0x13; // date
-	date.Year = 0x22; // year
+	date.WeekDay = WEEK_DAY;
+	date.Month = MONTH;
+	date.Date = DATE;
+	date.Year = YEAR;
 	if (HAL_RTC_SetDate(&hrtc, &date, RTC_FORMAT_BCD) != HAL_OK)
 		Error_Handler();
 
