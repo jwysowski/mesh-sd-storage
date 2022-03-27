@@ -57,13 +57,14 @@
 extern UART_HandleTypeDef huart1;
 extern uint8_t uart_buffer[MESSAGE_SIZE];
 
-extern uint8_t retUSER; /* Return value for USER */
+extern FRESULT retUSER; /* Return value for USER */
 extern char USERPath[4]; /* USER logical drive path */
 extern FATFS USERFatFS; /* File system object for USER logical drive */
 extern FIL USERFile; /* File object for USER */
 
-SemaphoreHandle_t read_mesh_sem;
-QueueHandle_t timestamps;
+TaskHandle_t read_rtc_task;
+TaskHandle_t build_log_task;
+TaskHandle_t write_sd_task;
 QueueHandle_t logs;
 
 struct date_time {
@@ -97,19 +98,12 @@ void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
  */
 void MX_FREERTOS_Init(void) {
 	/* USER CODE BEGIN Init */
-
 	/* USER CODE END Init */
 
 	/* USER CODE BEGIN RTOS_MUTEX */
-	/* add mutexes, ... */
 	/* USER CODE END RTOS_MUTEX */
 
 	/* USER CODE BEGIN RTOS_SEMAPHORES */
-	read_mesh_sem = xSemaphoreCreateBinary();
-	if (read_mesh_sem == NULL)
-		while (1)
-			;
-
 	/* USER CODE END RTOS_SEMAPHORES */
 
 	/* USER CODE BEGIN RTOS_TIMERS */
@@ -117,9 +111,8 @@ void MX_FREERTOS_Init(void) {
 	/* USER CODE END RTOS_TIMERS */
 
 	/* USER CODE BEGIN RTOS_QUEUES */
-	timestamps = xQueueCreate(5, sizeof(struct date_time));
 	logs = xQueueCreate(5, sizeof(struct log));
-	if (timestamps == NULL || logs == NULL)
+	if (logs == NULL)
 		Error_Handler();
 	/* USER CODE END RTOS_QUEUES */
 
@@ -127,65 +120,71 @@ void MX_FREERTOS_Init(void) {
 	/* definition and creation of defaultTask */
 
 	/* USER CODE BEGIN RTOS_THREADS */
-	xTaskCreate(read_rtc, "read_rtc", 150, NULL, 2, NULL);
-	xTaskCreate(build_log, "build_log", 150, NULL, 3, NULL);
-	xTaskCreate(write_sd, "write_sd", 310, NULL, 4, NULL);
+	xTaskCreate(read_rtc, "read_rtc", 150, NULL, 2, &read_rtc_task);
+	xTaskCreate(build_log, "build_log", 150, NULL, 3, &build_log_task);
+	xTaskCreate(write_sd, "write_sd", 310, NULL, 4, &write_sd_task);
 	/* USER CODE END RTOS_THREADS */
 }
 
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
 void read_rtc() {
-	uint8_t receive[MESSAGE_SIZE] = { 0 };
-	struct date_time t;
+	struct log mesh_log;
 	for (;;) {
-		if (xSemaphoreTake(read_mesh_sem, (TickType_t )20) == pdFALSE)
+		if (ulTaskNotifyTake(pdTRUE, 10) != 1)
 			continue;
 
-		memcpy(receive, uart_buffer, MESSAGE_SIZE);
-		memset(uart_buffer, 0, MESSAGE_SIZE);
+		if (uart_buffer[0] != ':') {
+			memset(uart_buffer, 0, MESSAGE_SIZE);
+			HAL_UART_Receive_IT(&huart1, uart_buffer, MESSAGE_SIZE);
+			continue;
+		}
 
-		get_time(&t);
-		xQueueSendToBack(timestamps, (void *)&t, (TickType_t )5);
+		memcpy(mesh_log.msg, uart_buffer, MESSAGE_SIZE);
+		memset(uart_buffer, 0, MESSAGE_SIZE);
+		get_time(&mesh_log.timestamp);
+		xQueueSendToBack(logs, (void *)&mesh_log, (TickType_t )5);
 
 		HAL_UART_Receive_IT(&huart1, uart_buffer, MESSAGE_SIZE);
+		xTaskNotifyGive(build_log_task);
 	}
 }
 
 void build_log() {
-	struct date_time t;
 	struct log mesh_log;
 	for (;;) {
-		if (xQueueReceive(timestamps, (void *)&t, (TickType_t) 30) == pdFALSE)
+		if (ulTaskNotifyTake(pdTRUE, 20) != 1)
+			continue;
+
+		if (xQueueReceive(logs, (void *)&mesh_log, (TickType_t) 2) == pdFALSE)
 			continue;
 
 		char conversion[CONVERSION_SIZE] = { 0 };
 
-		mesh_log.msg[0] = '\0';
-		sprintf(conversion, "%02d", t.date.Date);
+		mesh_log.msg[MESSAGE_SIZE - 1] = ' ';
+		mesh_log.msg[MESSAGE_SIZE] = '\0';
+
+		mesh_log.file_name_length = sprintf(conversion, "%02d", mesh_log.timestamp.date.Date);
 		strcat(mesh_log.msg, conversion);
-		sprintf(conversion, "%02d", t.date.Month);
+		mesh_log.file_name_length += sprintf(conversion, "%02d", mesh_log.timestamp.date.Month);
 		strcat(mesh_log.msg, conversion);
-		sprintf(conversion, "%2d", t.date.Year);
+		mesh_log.file_name_length += sprintf(conversion, "%2d", mesh_log.timestamp.date.Year);
 		strcat(mesh_log.msg, conversion);
 
-		mesh_log.file_name_length = strlen(mesh_log.msg);
+		mesh_log.log_length = mesh_log.file_name_length;
 
-		sprintf(conversion, "%02d", t.time.Hours);
+		mesh_log.log_length += sprintf(conversion, "%02d", mesh_log.timestamp.time.Hours);
 		strcat(mesh_log.msg, conversion);
-		sprintf(conversion, "%02d", t.time.Minutes);
+		mesh_log.log_length += sprintf(conversion, "%02d", mesh_log.timestamp.time.Minutes);
 		strcat(mesh_log.msg, conversion);
-		sprintf(conversion, "%02d", t.time.Seconds);
+		mesh_log.log_length += sprintf(conversion, "%02d", mesh_log.timestamp.time.Seconds);
 		strcat(mesh_log.msg, conversion);
 
-		uint8_t timestamp_length = strlen(mesh_log.msg);
-		mesh_log.msg[timestamp_length] = ' ';
-		for (int i = 0; i < MESSAGE_SIZE; i++)
-			mesh_log.msg[timestamp_length + 1 + i] = uart_buffer[i];
-
-		mesh_log.log_length = timestamp_length + 1 + MESSAGE_SIZE;
+		mesh_log.log_length += 1 + MESSAGE_SIZE;
+		mesh_log.msg[mesh_log.log_length - 1] = '\n';
 
 		xQueueSendToBack(logs, (void *)&mesh_log, (TickType_t )5);
+		xTaskNotifyGive(write_sd_task);
 	}
 }
 /*
@@ -200,23 +199,23 @@ void write_sd() {
 	const char *txt_ext = ".txt";
 	HAL_UART_Receive_IT(&huart1, uart_buffer, MESSAGE_SIZE);
 	for (;;) {
-		if (xQueueReceive(logs, (void *)&mesh_log,
-				(TickType_t) 100) == pdFALSE)
+		if (ulTaskNotifyTake(pdTRUE, 100) != 1)
+			continue;
+
+		if (xQueueReceive(logs, (void *)&mesh_log, (TickType_t)2) == pdFALSE)
 			continue;
 
 		char *file_name = pvPortMalloc(
 				(mesh_log.file_name_length + 1 + EXTENSION_SIZE) * sizeof(char));
 
-		for (int i = 0; i < mesh_log.file_name_length + 1; i++)
-			file_name[i] = mesh_log.msg[i];
+		memcpy(file_name, &mesh_log.msg[MESSAGE_SIZE], mesh_log.file_name_length);
+//		for (int i = 0; i < mesh_log.file_name_length + 1; i++)
+//			file_name[i] = mesh_log.msg[MESSAGE_SIZE + i];
 
 		file_name[mesh_log.file_name_length] = '\0';
 		strcat(file_name, txt_ext);
 
 		retUSER = f_mount(&USERFatFS, "/", 1);
-		if (retUSER != FR_OK)
-			Error_Handler();
-
 		retUSER = f_open(&USERFile, file_name, FA_OPEN_ALWAYS | FA_READ | FA_WRITE);
 		retUSER = f_lseek(&USERFile, f_size(&USERFile));
 		retUSER = f_write(&USERFile, (void *)mesh_log.msg, mesh_log.log_length, &bw);

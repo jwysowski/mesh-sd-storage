@@ -37,14 +37,14 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define INIT_RTC			1
-#define HOURS				0x22
-#define MINUTES				0x20
+#define HOURS				0x21
+#define MINUTES				0x37
 #define SECONDS				0x00
 #define DAY_LIGHT_SAVING	RTC_DAYLIGHTSAVING_NONE
 #define STORE_OPERATION		RTC_STOREOPERATION_RESET
-#define WEEK_DAY			RTC_WEEKDAY_THURSDAY
+#define WEEK_DAY			RTC_WEEKDAY_SUNDAY
 #define	MONTH				RTC_MONTH_MARCH
-#define DATE				0x24
+#define DATE				0x27
 #define YEAR				0x22
 /* USER CODE END PD */
 

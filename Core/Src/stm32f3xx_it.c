@@ -68,7 +68,7 @@ extern UART_HandleTypeDef huart1;
 extern TIM_HandleTypeDef htim6;
 
 /* USER CODE BEGIN EV */
-extern SemaphoreHandle_t read_mesh_sem;
+extern TaskHandle_t read_rtc_task;
 /* USER CODE END EV */
 
 /******************************************************************************/
@@ -203,7 +203,9 @@ void TIM6_DAC1_IRQHandler(void)
 /* USER CODE BEGIN 1 */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 	BaseType_t higher_priority_task_woken = pdFALSE;
-	xSemaphoreGiveFromISR(read_mesh_sem, &higher_priority_task_woken);
+
+	vTaskNotifyGiveFromISR(read_rtc_task, &higher_priority_task_woken);
+
 	portYIELD_FROM_ISR(higher_priority_task_woken);
 }
 /* USER CODE END 1 */
